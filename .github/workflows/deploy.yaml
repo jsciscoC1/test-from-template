@@ -1,0 +1,50 @@
+name: Deploy master to prod
+
+on:
+  pull_request:
+    types: [closed]
+
+env:
+  DEPLOY_TO_ENV: $PULUMI_STACK
+  GCLOUD_PROJECT_ID: $GCP_PROJECT_ID
+  GCP_ARTIFACT_REGISTRY: $GCP_ARTIFACT_REGISTRY_URL
+  GCP_WORKLOAD_IDENTITY_PROVIDER: $GCP_WIF_PROVIDER
+  SERVICE_ACCOUNT: $GCP_GITHUB_ACTIONS_SERVICE_ACCOUNT
+
+
+permissions:
+  contents: read # Necessary to pull the repository. Set by default, but once we override `permissions` it must be set explicitly
+  id-token: write # Allows the JWT to be requested from GitHub's OIDC provider
+
+jobs:
+  build_and_deploy_to_prod:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: "Authenticate to Google Cloud"
+        id: gcp-auth
+        uses: "google-github-actions/auth@v0.8.0"
+        with:
+          workload_identity_provider: "${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER}}"
+          service_account: "${{ env.SERVICE_ACCOUNT }}"
+          token_format: "access_token"
+      - name: "Log in to GCP Artifact Registry"
+        id: gar-login
+        uses: docker/login-action@v2
+        with:
+          registry: "${{ env.GCP_ARTIFACT_REGISTRY }}"
+          username: oauth2accesstoken
+          password: ${{ steps.gcp-auth.outputs.access_token }}
+      - name: Deploy with pulumi
+        uses: pulumi/actions@v3
+        with:
+          command: up
+          stack-name: ${{ env.DEPLOY_TO_ENV }}
+          work-dir: ./infrastructure
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
